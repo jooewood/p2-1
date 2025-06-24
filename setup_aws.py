@@ -3,6 +3,12 @@
 import boto3
 import os
 import time
+
+from key import (
+    AWS_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY
+)
+
 from config import (
     AWS_REGION,
     S3_INPUT_BUCKET, S3_OUTPUT_BUCKET, SQS_QUEUE_NAME,
