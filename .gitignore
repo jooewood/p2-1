@@ -1,7 +1,5 @@
 imagenet-100/
 *.pem
-workload_generator.py
-multithread_workload_generator.py
 *test*.py
 key.py
 
@@ -199,4 +197,3 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
-multithread_workload_generator.py
