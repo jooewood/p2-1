@@ -2,6 +2,7 @@ imagenet-100/
 *.pem
 *test*.py
 key.py
+*.xlsx
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
