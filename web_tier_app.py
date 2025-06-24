@@ -299,16 +299,15 @@ async def health_check():
     return PlainTextResponse("Web Tier is running.")
 
 @app.post("/upload", response_class=PlainTextResponse)
-async def upload_image(file: UploadFile = File(...)):
+async def upload_image(myfile: UploadFile = File(...)):
     """
     Handles image uploads, stores them in S3, sends a message to SQS,
     then polls S3 for the result and returns it.
     """
-    if not file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-        raise HTTPException(status_code=400, detail="Invalid file type. Only PNG, JPG, JPEG are allowed.")
+    content_type = "image/jpeg"
 
     # Original filename provided by the user (e.g., test_0.JPEG)
-    original_filename = file.filename
+    original_filename = myfile.filename
     # Generate a unique S3 input key using UUID to prevent collisions
     file_extension = os.path.splitext(original_filename)[1]
     # Use original filename as part of the key to track it, combined with UUID for uniqueness
@@ -320,8 +319,8 @@ async def upload_image(file: UploadFile = File(...)):
 
     try:
         # Upload image to S3 input bucket
-        file_content = await file.read()
-        s3.put_object(Bucket=S3_INPUT_BUCKET, Key=unique_input_s3_key, Body=file_content, ContentType=file.content_type)
+        file_content = await myfile.read()
+        s3.put_object(Bucket=S3_INPUT_BUCKET, Key=unique_input_s3_key, Body=file_content, ContentType=content_type)
         logging.info(f"Uploaded {original_filename} to S3 as {unique_input_s3_key}")
 
         # Send message to SQS queue with the unique S3 input key AND the expected S3 output key
