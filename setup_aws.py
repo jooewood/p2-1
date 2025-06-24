@@ -208,8 +208,8 @@ def launch_web_tier_instance(web_sg_id):
     # This user data script will install necessary packages and start the FastAPI app
     # It dynamically embeds the content of config.py and web_tier_app.py
     try:
-        with open("config.py", "r") as f_config:
-            config_content = f_config.read()
+        with open("key.py", "r") as f_key:
+            key_content = f_key.read()
         user_data_script = f"""#!/bin/bash
 sudo -i
 cd /home/ubuntu
@@ -229,8 +229,8 @@ source venv/bin/activate
 pip install --upgrade pip
 pip install fastapi uvicorn python-multipart boto3
 
-cat << 'EOF_CONFIG' > config.py
-{config_content}
+cat << 'EOF_CONFIG' > key.py
+{key_content}
 EOF_CONFIG
 
 nohup venv/bin/uvicorn web_tier_app:app --host 0.0.0.0 --port 8000 &> web_tier_app.log &

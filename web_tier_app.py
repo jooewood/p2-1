@@ -124,8 +124,8 @@ def launch_app_instance(instance_name_tag):
     # This user data script will install necessary packages, clone the classifier repo,
     # and start the app_tier_worker.
     try:
-        with open("config.py", "r") as f_config:
-            config_content = f_config.read()
+        with open("key.py", "r") as f_key:
+            key_content = f_key.read()
 
         user_data_app_script = f"""#!/bin/bash
 sudo -i
@@ -146,9 +146,8 @@ pip install --upgrade pip
 pip install boto3
 pip install --break-system-packages torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-# Embed config.py content (overwrite repo's config.py)
-cat << 'EOF_CONFIG' > config.py
-{config_content}
+cat << 'EOF_CONFIG' > key.py
+{key_content}
 EOF_CONFIG
 
 # Start the App Tier Worker in the background
