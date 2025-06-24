@@ -2,6 +2,8 @@
 
 import os
 
+
+AWS_REGION = 'ap-northeast-2'
 # S3 Bucket Names
 S3_INPUT_BUCKET = 'cse546-zhoudixin-image-input-bucket'
 S3_OUTPUT_BUCKET = 'cse546-zhoudixin-image-output-bucket'
