@@ -44,6 +44,6 @@ WEB_TIER_PUBLIC_IP = "" # No longer directly used by user, but still useful for 
 
 # Polling interval and timeout for Web Tier to retrieve results from S3
 WEB_TIER_POLLING_INTERVAL = 1 # seconds
-WEB_TIER_POLLING_TIMEOUT = 300 # seconds (5 minutes)
+WEB_TIER_POLLING_TIMEOUT = 3000 # seconds (5 minutes)
 
 GIT_REPO_URL = 'https://github.com/jooewood/p2-1.git'
