@@ -106,6 +106,24 @@ def get_approximate_number_of_messages():
         logging.error(f"Failed to get SQS queue attributes: {e}")
         return 0
 
+def get_approximate_number_of_response_messages():
+    """Gets the approximate number of messages in the response SQS queue."""
+    queue_url = get_queue_url(RESPONSE_SQS_QUEUE_NAME)
+    if not queue_url:
+        return 0
+    try:
+        response = sqs.get_queue_attributes(
+            QueueUrl=queue_url,
+            AttributeNames=['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
+        )
+        visible = int(response['Attributes'].get('ApproximateNumberOfMessages', 0))
+        not_visible = int(response['Attributes'].get('ApproximateNumberOfMessagesNotVisible', 0))
+        total_messages = visible + not_visible
+        return total_messages
+    except Exception as e:
+        logging.error(f"Failed to get response SQS queue attributes: {e}")
+        return 0
+
 def get_running_app_instances():
     """Gets a list of running App Tier instance IDs."""
     try:
@@ -222,13 +240,14 @@ async def auto_scaling_controller():
     while True:
         try:
             queue_messages = get_approximate_number_of_messages()
+            response_queue_messages = get_approximate_number_of_response_messages()
             current_running_instances = get_running_app_instances()
             # Update the set of running instances to remove terminated ones
             with app_instance_count_lock:
                 running_app_instances.intersection_update(current_running_instances)
             current_instance_count = len(running_app_instances)
 
-            logging.info(f"SQS messages: {queue_messages}, Current App instances: {current_instance_count}")
+            logging.info(f"Request SQS: {queue_messages}, Response SQS: {response_queue_messages}, Current App instances: {current_instance_count}")
 
             # Decide target number of app instances
             if queue_messages > 2:
