@@ -3,7 +3,7 @@
 import os
 
 
-AWS_REGION = 'ap-northeast-2'
+AWS_REGION = 'ap-northeast-3'
 # S3 Bucket Names
 S3_INPUT_BUCKET = 'cse546-zhoudixin-image-input-bucket'
 S3_OUTPUT_BUCKET = 'cse546-zhoudixin-image-output-bucket'
@@ -13,9 +13,15 @@ SQS_QUEUE_NAME = 'cse546-zhoudixin-image-processing-queue'
 RESPONSE_SQS_QUEUE_NAME = 'cse546-zhoudixin-image-response-queue' # New: SQS queue for responses
 
 # EC2 Key Pair Name
-EC2_KEY_PAIR_NAME = 'zhoudixin'
+if AWS_REGION == 'ap-northeast-3':
+    EC2_KEY_PAIR_NAME = 'zhoudixin-ap-northeast-3'
+elif AWS_REGION == 'ap-northeast-2':
+    EC2_KEY_PAIR_NAME = 'zhoudixin-ap-northeast-2'
 
-AMI_ID = "ami-0662f4965dfc70aca" # Ubuntu Server 20.04 LTS (HVM), SSD Volume Type
+if AWS_REGION == 'ap-northeast-2':
+    AMI_ID = "ami-0662f4965dfc70aca"
+elif AWS_REGION == 'ap-northeast-3':
+    AMI_ID = "ami-0aafffc426e129572"
 
 # Instance Types
 WEB_TIER_INSTANCE_TYPE = 't2.micro'

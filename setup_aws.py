@@ -253,24 +253,28 @@ sleep 2
         return None
 
     try:
-        # Check for existing web-tier instances to avoid launching duplicates
-        existing_instances = ec2.describe_instances(
-            Filters=[
-                {'Name': 'instance-state-name', 'Values': ['pending', 'running']},
-                {'Name': 'tag:Name', 'Values': ['web-instance-1']}
-            ]
-        )
-        if existing_instances['Reservations']:
-            print("Web tier instance 'web-instance-1' already exists and is running/pending.")
-            web_instance_id = existing_instances['Reservations'][0]['Instances'][0]['InstanceId']
-            
-            # Get public IP of existing instance
-            instance_info = ec2.describe_instances(InstanceIds=[web_instance_id])
-            public_ip = instance_info['Reservations'][0]['Instances'][0]['PublicIpAddress']
-            print(f"Existing Web Tier instance '{web_instance_id}'. Public IP: {public_ip}")
-            return web_instance_id
+        # Find the next available web-instance-N name
+        instance_num = 1
+        while True:
+            instance_name = f"web-instance-{instance_num}"
+            existing_instances = ec2.describe_instances(
+                Filters=[
+                    {'Name': 'instance-state-name', 'Values': ['pending', 'running']},
+                    {'Name': 'tag:Name', 'Values': [instance_name]}
+                ]
+            )
+            if not existing_instances['Reservations']:
+                break
+            else:
+                print(f"Web tier instance '{instance_name}' already exists and is running/pending.")
+                web_instance_id = existing_instances['Reservations'][0]['Instances'][0]['InstanceId']
+                # Get public IP of existing instance
+                instance_info = ec2.describe_instances(InstanceIds=[web_instance_id])
+                public_ip = instance_info['Reservations'][0]['Instances'][0].get('PublicIpAddress', 'N/A')
+                print(f"Existing Web Tier instance '{web_instance_id}'. Public IP: {public_ip}")
+                instance_num += 1
 
-        # Launch new instance
+        # Launch new instance with the next available name
         response = ec2.run_instances(
             ImageId=AMI_ID,
             MinCount=1,
@@ -282,12 +286,12 @@ sleep 2
             TagSpecifications=[
                 {
                     'ResourceType': 'instance',
-                    'Tags': [{'Key': 'Name', 'Value': 'web-instance-1'}]
+                    'Tags': [{'Key': 'Name', 'Value': instance_name}]
                 }
             ]
         )
         instance_id = response['Instances'][0]['InstanceId']
-        print(f"Launched Web Tier instance with ID: {instance_id}")
+        print(f"Launched Web Tier instance with ID: {instance_id} (Name: {instance_name})")
 
         # Wait for the instance to be running
         print("Waiting for Web Tier instance to be running...")
@@ -298,8 +302,6 @@ sleep 2
         instance_info = ec2.describe_instances(InstanceIds=[instance_id])
         public_ip = instance_info['Reservations'][0]['Instances'][0]['PublicIpAddress']
         print(f"Web Tier instance '{instance_id}' is running. Public IP: {public_ip}")
-        # Optionally, update config.py with this IP if you need to read it later from config.
-        # This is for display purposes here.
         return instance_id
     except Exception as e:
         print(f"Failed to launch Web Tier instance: {e}")
