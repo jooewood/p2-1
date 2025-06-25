@@ -342,6 +342,3 @@ if __name__ == "__main__":
 
     print("\n--- AWS Setup Complete ---")
     print(f"Web Tier instance (ID: {web_instance_id}) is running.")
-    print("Please check the console for its Public IP to configure your workload generator.")
-    print("Next: Run your workload generator against http://<WEB_TIER_PUBLIC_IP>:8000/upload")
-
