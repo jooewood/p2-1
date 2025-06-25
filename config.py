@@ -43,7 +43,6 @@ KEY_FILE_PATH = f"{EC2_KEY_PAIR_NAME}.pem"
 WEB_TIER_PUBLIC_IP = "" # No longer directly used by user, but still useful for workload generator setup
 
 # Polling interval and timeout for Web Tier to retrieve results from S3
-WEB_TIER_POLLING_INTERVAL = 1 # seconds
-WEB_TIER_POLLING_TIMEOUT = 3000 # seconds (5 minutes)
+WEB_TIER_POLLING_INTERVAL = 5 # seconds
 
 GIT_REPO_URL = 'https://github.com/jooewood/p2-1.git'

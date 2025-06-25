@@ -17,7 +17,7 @@ from key import (
 
 from config import (
     AWS_REGION,
-    S3_INPUT_BUCKET, S3_OUTPUT_BUCKET, SQS_QUEUE_NAME, RESPONSE_SQS_QUEUE_NAME, # Added RESPONSE_SQS_QUEUE_NAME
+    S3_INPUT_BUCKET, S3_OUTPUT_BUCKET, SQS_QUEUE_NAME, RESPONSE_SQS_QUEUE_NAME,
     EC2_KEY_PAIR_NAME, AMI_ID, APP_TIER_INSTANCE_TYPE,
     MAX_APP_INSTANCES, MIN_APP_INSTANCES,
     SCALING_CHECK_INTERVAL, WEB_TIER_POLLING_INTERVAL,
@@ -431,22 +431,20 @@ async def upload_image(myfile: UploadFile = File(...)):
         pending_requests[unique_request_id] = future_result
         logging.info(f"Added request {unique_request_id} to pending_requests.")
 
-        # Await the result from the response queue poller
-        prediction_result = await asyncio.wait_for(future_result, timeout=WEB_TIER_POLLING_INTERVAL * 60) # Increased timeout for practical purposes
+        # Await the result from the response queue poller indefinitely (no timeout)
+        prediction_result = await future_result
         
         logging.info(f"Returning prediction for {original_filename}: {prediction_result}")
         return PlainTextResponse(prediction_result)
 
-    except asyncio.TimeoutError:
-        logging.error(f"Timeout waiting for result for {original_filename} (request ID: {unique_request_id}).")
-        # Remove from pending requests if timeout occurs
-        if unique_request_id in pending_requests:
-            del pending_requests[unique_request_id]
-        raise HTTPException(status_code=504, detail="Prediction service timed out.")
-    except Exception as e:
+    except Exception as e: # Catch all exceptions, including cancelled futures if the app shuts down
         logging.error(f"Error processing upload for {original_filename}: {e}")
         # Clean up pending request if an error occurs before awaiting result
         if unique_request_id in pending_requests:
             del pending_requests[unique_request_id]
-        raise HTTPException(status_code=500, detail=f"Failed to process image upload: {e}")
+        # Depending on the type of error, you might want to return a different HTTPException status code
+        if isinstance(e, asyncio.CancelledError):
+            raise HTTPException(status_code=500, detail="Request processing cancelled (e.g., server shutdown).")
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to process image upload: {e}")
 
