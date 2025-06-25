@@ -13,7 +13,7 @@ from key import (
 
 from config import (
     AWS_REGION,
-    S3_INPUT_BUCKET, S3_OUTPUT_BUCKET, SQS_QUEUE_NAME,
+    S3_INPUT_BUCKET, S3_OUTPUT_BUCKET, SQS_QUEUE_NAME, RESPONSE_SQS_QUEUE_NAME, # Added RESPONSE_SQS_QUEUE_NAME
     REMOTE_APP_DIR
 )
 
@@ -34,13 +34,18 @@ sqs = boto3.client(
     aws_secret_access_key=AWS_SECRET_ACCESS_KEY
 )
 
-def get_queue_url():
-    """Retrieves the SQS queue URL."""
+# SQS Queue URLs (will be retrieved once)
+request_queue_url = None
+response_queue_url = None
+
+
+def get_queue_url(queue_name):
+    """Retrieves the SQS queue URL for a given queue name."""
     try:
-        response = sqs.get_queue_url(QueueName=SQS_QUEUE_NAME)
+        response = sqs.get_queue_url(QueueName=queue_name)
         return response['QueueUrl']
     except Exception as e:
-        logging.error(f"Failed to get SQS queue URL for {SQS_QUEUE_NAME}: {e}")
+        logging.error(f"Failed to get SQS queue URL for {queue_name}: {e}")
         return None
 
 def download_image_from_s3(s3_key, download_path):
@@ -66,6 +71,28 @@ def upload_result_to_s3(output_s3_key, result_text_content):
     except Exception as e:
         logging.error(f"Error uploading result for {output_s3_key} to S3: {e}")
         return False
+
+def send_response_to_sqs(original_filename, prediction_result, unique_request_id):
+    """Sends the prediction result to the response SQS queue."""
+    global response_queue_url
+    if not response_queue_url:
+        response_queue_url = get_queue_url(RESPONSE_SQS_QUEUE_NAME)
+        if not response_queue_url:
+            logging.error("Response SQS queue URL not available. Cannot send response.")
+            return False
+    
+    try:
+        message_body = f"{original_filename},{prediction_result},{unique_request_id}"
+        sqs.send_message(
+            QueueUrl=response_queue_url,
+            MessageBody=message_body
+        )
+        logging.info(f"Sent response for '{original_filename}' with prediction '{prediction_result}' to response SQS (Request ID: {unique_request_id}).")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to send response for {original_filename} to response SQS: {e}")
+        return False
+
 
 def perform_image_classification(image_path):
     """
@@ -94,9 +121,17 @@ def perform_image_classification(image_path):
 
 def main():
     """Main loop for the App Tier Worker."""
-    queue_url = get_queue_url()
-    if not queue_url:
-        logging.error("Could not get SQS queue URL. Exiting worker.")
+    global request_queue_url, response_queue_url
+    
+    # Initialize queue URLs once
+    request_queue_url = get_queue_url(SQS_QUEUE_NAME)
+    response_queue_url = get_queue_url(RESPONSE_SQS_QUEUE_NAME)
+
+    if not request_queue_url:
+        logging.error("Could not get request SQS queue URL. Exiting worker.")
+        return
+    if not response_queue_url:
+        logging.error("Could not get response SQS queue URL. Exiting worker.")
         return
 
     # Create a temporary directory for image downloads
@@ -109,36 +144,37 @@ def main():
     while True:
         try:
             response = sqs.receive_message(
-                QueueUrl=queue_url,
+                QueueUrl=request_queue_url, # Polling the request queue
                 MaxNumberOfMessages=1,
                 WaitTimeSeconds=20 # Long polling
             )
 
             messages = response.get('Messages', [])
             if not messages:
-                logging.info("No messages in queue. Waiting...")
+                logging.info("No messages in request queue. Waiting...")
                 time.sleep(5) # Short sleep if no messages found quickly
                 continue
 
             for message in messages:
                 receipt_handle = message['ReceiptHandle']
-                # Message body contains "unique_input_s3_key,output_s3_key_base"
-                # Example: "uuid-test_0.JPEG,test_0"
-                message_parts = message['Body'].split(',', 1)
-                if len(message_parts) != 2:
+                # Message body contains "unique_input_s3_key,original_filename,unique_request_id"
+                # Example: "uuid-test_0.JPEG,test_0.JPEG,test_0-uuid"
+                message_parts = message['Body'].split(',', 2) # Split at most twice
+                if len(message_parts) != 3:
                     logging.error(f"Malformed SQS message body: {message['Body']}. Skipping.")
-                    sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle)
+                    sqs.delete_message(QueueUrl=request_queue_url, ReceiptHandle=receipt_handle)
                     continue
 
                 unique_input_s3_key = message_parts[0]
-                output_s3_key_base = message_parts[1] # e.g., 'test_0'
+                original_filename = message_parts[1] 
+                unique_request_id = message_parts[2]
 
-                logging.info(f"Received message: Input S3 Key='{unique_input_s3_key}', Output S3 Key Base='{output_s3_key_base}', ReceiptHandle='{receipt_handle}'")
+                # The S3 output key should be the original filename without extension (e.g., test_0)
+                output_s3_key_base = os.path.splitext(original_filename)[0]
 
-                # The original filename with extension is part of unique_input_s3_key (e.g., uuid-test_0.JPEG)
-                original_filename_with_ext = unique_input_s3_key.split('-', 1)[-1] # Extracts "test_0.JPEG"
+                logging.info(f"Received message: Input S3 Key='{unique_input_s3_key}', Original Filename='{original_filename}', Request ID='{unique_request_id}', ReceiptHandle='{receipt_handle}'")
 
-                local_image_path = os.path.join(temp_dir, original_filename_with_ext)
+                local_image_path = os.path.join(temp_dir, original_filename)
 
                 if download_image_from_s3(unique_input_s3_key, local_image_path):
                     raw_prediction_output = perform_image_classification(local_image_path) # e.g., "test_0.JPEG,bathtub"
@@ -155,21 +191,24 @@ def main():
                             # Example: "(test_0, bathtub)"
                             s3_output_content = f"({output_s3_key_base}, {prediction_label})"
                             
-                            if upload_result_to_s3(output_s3_key_base, s3_output_content):
-                                # Delete message from queue only after successful processing and upload
+                            s3_uploaded = upload_result_to_s3(output_s3_key_base, s3_output_content)
+                            sqs_response_sent = send_response_to_sqs(original_filename, prediction_label, unique_request_id) # Send to response SQS
+
+                            if s3_uploaded and sqs_response_sent:
+                                # Delete message from queue only after successful processing and upload to S3 and response SQS
                                 sqs.delete_message(
-                                    QueueUrl=queue_url,
+                                    QueueUrl=request_queue_url,
                                     ReceiptHandle=receipt_handle
                                 )
-                                logging.info(f"Successfully processed {unique_input_s3_key} and deleted message from queue.")
+                                logging.info(f"Successfully processed {unique_input_s3_key} and deleted message from request queue.")
                             else:
-                                logging.error(f"Failed to upload result for {unique_input_s3_key}. Message not deleted.")
+                                logging.error(f"Failed to upload result to S3 or send to response SQS for {unique_input_s3_key}. Message not deleted from request queue.")
                         else:
-                            logging.error(f"Unexpected format from classification script: {raw_prediction_output}. Message not deleted.")
+                            logging.error(f"Unexpected format from classification script: {raw_prediction_output}. Message not deleted from request queue.")
                     else:
-                        logging.error(f"Image classification failed for {unique_input_s3_key}. Message not deleted.")
+                        logging.error(f"Image classification failed for {unique_input_s3_key}. Message not deleted from request queue.")
                 else:
-                    logging.error(f"Failed to download image {unique_input_s3_key}. Message not deleted.")
+                    logging.error(f"Failed to download image {unique_input_s3_key}. Message not deleted from request queue.")
 
                 # Clean up local image file
                 if os.path.exists(local_image_path):

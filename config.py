@@ -10,6 +10,7 @@ S3_OUTPUT_BUCKET = 'cse546-zhoudixin-image-output-bucket'
 
 # SQS Queue Name
 SQS_QUEUE_NAME = 'cse546-zhoudixin-image-processing-queue'
+RESPONSE_SQS_QUEUE_NAME = 'cse546-zhoudixin-image-response-queue' # New: SQS queue for responses
 
 # EC2 Key Pair Name
 EC2_KEY_PAIR_NAME = 'zhoudixin'

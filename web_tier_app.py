@@ -17,11 +17,11 @@ from key import (
 
 from config import (
     AWS_REGION,
-    S3_INPUT_BUCKET, S3_OUTPUT_BUCKET, SQS_QUEUE_NAME,
+    S3_INPUT_BUCKET, S3_OUTPUT_BUCKET, SQS_QUEUE_NAME, RESPONSE_SQS_QUEUE_NAME, # Added RESPONSE_SQS_QUEUE_NAME
     EC2_KEY_PAIR_NAME, AMI_ID, APP_TIER_INSTANCE_TYPE,
     MAX_APP_INSTANCES, MIN_APP_INSTANCES,
-    SCALING_CHECK_INTERVAL,
-    REMOTE_APP_DIR, WEB_TIER_POLLING_INTERVAL, GIT_REPO_URL
+    SCALING_CHECK_INTERVAL, WEB_TIER_POLLING_INTERVAL,
+    REMOTE_APP_DIR, GIT_REPO_URL
 )
 
 app = FastAPI()
@@ -54,13 +54,23 @@ app_tier_sg_id = None # Will be retrieved on startup
 app_instance_count_lock = threading.Lock() # Lock for managing instance count
 running_app_instances = set() # Store instance IDs of running app tier instances
 
-def get_queue_url():
-    """Retrieves the SQS queue URL."""
+# Dictionary to hold futures for pending requests
+# Key: unique_request_id (derived from output_s3_key_base + UUID)
+# Value: asyncio.Future object
+pending_requests = {}
+
+# SQS Queue URLs
+request_queue_url = None
+response_queue_url = None
+
+
+def get_queue_url(queue_name):
+    """Retrieves the SQS queue URL for a given queue name."""
     try:
-        response = sqs.get_queue_url(QueueName=SQS_QUEUE_NAME)
+        response = sqs.get_queue_url(QueueName=queue_name)
         return response['QueueUrl']
     except Exception as e:
-        logging.error(f"Failed to get SQS queue URL: {e}")
+        logging.error(f"Failed to get SQS queue URL for {queue_name}: {e}")
         return None
 
 def get_app_tier_security_group_id():
@@ -80,7 +90,7 @@ def get_app_tier_security_group_id():
 
 def get_approximate_number_of_messages():
     """Gets the approximate number of messages in the SQS queue."""
-    queue_url = get_queue_url()
+    queue_url = get_queue_url(SQS_QUEUE_NAME)
     if not queue_url:
         return 0
     try:
@@ -151,15 +161,12 @@ cat << 'EOF_CONFIG' > key.py
 EOF_CONFIG
 
 # Start the App Tier Worker in the background
-
 nohup python3 app_tier_worker.py &> app_tier_worker.log &
 echo "App tier worker started."
 """
-# nohup python3 app_tier_worker.py &> app_tier_worker.log &
-# python3 app_tier_worker.py
 
     except FileNotFoundError as e:
-        logging.error(f"Error reading file for user_data_app_script: {e}. Make sure config.py and app_tier_worker.py exist.")
+        logging.error(f"Error reading file for user_data_app_script: {e}. Make sure key.py exists.")
         return None
     except Exception as e:
         logging.error(f"Error preparing user data for app tier: {e}")
@@ -282,14 +289,97 @@ async def auto_scaling_controller():
         finally:
             await asyncio.sleep(SCALING_CHECK_INTERVAL)
 
+async def response_queue_poller():
+    """
+    Continuously polls the response SQS queue for results and
+    sets the result on the corresponding Future object in pending_requests.
+    """
+    global response_queue_url
+    logging.info("Response queue poller started.")
+    while True:
+        try:
+            if not response_queue_url:
+                response_queue_url = get_queue_url(RESPONSE_SQS_QUEUE_NAME)
+                if not response_queue_url:
+                    logging.error("Response SQS queue URL not found. Retrying in 5 seconds...")
+                    await asyncio.sleep(5)
+                    continue
+
+            response = sqs.receive_message(
+                QueueUrl=response_queue_url,
+                MaxNumberOfMessages=10, # Fetch up to 10 messages at once
+                WaitTimeSeconds=WEB_TIER_POLLING_INTERVAL # Use configured polling interval for long polling
+            )
+
+            messages = response.get('Messages', [])
+            if not messages:
+                logging.debug("No messages in response queue. Waiting...")
+                await asyncio.sleep(1) # Short sleep if no messages, to avoid busy-waiting
+                continue
+
+            for message in messages:
+                receipt_handle = message['ReceiptHandle']
+                # Expected format: "original_filename,prediction_result,unique_request_id"
+                message_body = message['Body']
+                logging.info(f"Received response message: {message_body}")
+
+                try:
+                    parts = message_body.split(',', 2) # Split into at most 3 parts
+                    if len(parts) == 3:
+                        original_filename = parts[0]
+                        prediction_result = parts[1]
+                        unique_request_id = parts[2]
+
+                        if unique_request_id in pending_requests:
+                            future = pending_requests.pop(unique_request_id)
+                            if not future.done():
+                                future.set_result(prediction_result)
+                                logging.info(f"Set result for request {unique_request_id} (file: {original_filename}): {prediction_result}")
+                            else:
+                                logging.warning(f"Future for {unique_request_id} already done. Message might be duplicate.")
+                        else:
+                            logging.warning(f"Received result for unknown request ID: {unique_request_id} (file: {original_filename}).")
+                        
+                        # Delete message from queue after processing
+                        sqs.delete_message(QueueUrl=response_queue_url, ReceiptHandle=receipt_handle)
+                        logging.info(f"Deleted response message with ReceiptHandle: {receipt_handle}")
+                    else:
+                        logging.error(f"Malformed response SQS message body: {message_body}. Skipping and deleting.")
+                        # Delete malformed message to prevent re-processing
+                        sqs.delete_message(QueueUrl=response_queue_url, ReceiptHandle=receipt_handle)
+
+                except Exception as parse_e:
+                    logging.error(f"Error processing response SQS message '{message_body}': {parse_e}. Deleting message.")
+                    sqs.delete_message(QueueUrl=response_queue_url, ReceiptHandle=receipt_handle)
+        
+        except Exception as e:
+            logging.error(f"Error in response queue poller: {e}")
+        finally:
+            # Short sleep to prevent busy-waiting even if polling is quick
+            await asyncio.sleep(1) 
+
+
 @app.on_event("startup")
 async def startup_event():
-    """On startup, ensure SQS queue URL is known and start the auto-scaling controller."""
+    """On startup, ensure SQS queue URLs are known and start background tasks."""
+    global request_queue_url, response_queue_url
     logging.info("FastAPI app starting up.")
-    get_queue_url() # Attempt to get queue URL on startup
+    
+    # Get request and response queue URLs
+    request_queue_url = get_queue_url(SQS_QUEUE_NAME)
+    response_queue_url = get_queue_url(RESPONSE_SQS_QUEUE_NAME)
+
+    if not request_queue_url:
+        logging.error("Failed to get request SQS queue URL on startup.")
+    if not response_queue_url:
+        logging.error("Failed to get response SQS queue URL on startup.")
+
     get_app_tier_security_group_id() # Attempt to get App Tier SG ID
+
+    # Start background tasks
     asyncio.create_task(auto_scaling_controller())
-    logging.info("Auto-scaling controller scheduled.")
+    asyncio.create_task(response_queue_poller())
+    logging.info("Auto-scaling controller and response queue poller scheduled.")
 
 @app.get("/")
 async def health_check():
@@ -301,21 +391,20 @@ async def health_check():
 @app.post("/upload", response_class=PlainTextResponse)
 async def upload_image(myfile: UploadFile = File(...)):
     """
-    Handles image uploads, stores them in S3, sends a message to SQS,
-    then polls S3 for the result and returns it.
+    Handles image uploads, stores them in S3, sends a message to the request SQS queue,
+    and awaits the result from the response SQS queue.
     """
     content_type = "image/jpeg"
 
-    # Original filename provided by the user (e.g., test_0.JPEG)
     original_filename = myfile.filename
+    # Generate a unique ID for this specific request, combining with original filename for traceability
+    # This ID will be used to match the response later.
+    unique_request_id = f"{os.path.splitext(original_filename)[0]}-{uuid.uuid4()}" 
+    
     # Generate a unique S3 input key using UUID to prevent collisions
-    file_extension = os.path.splitext(original_filename)[1]
-    # Use original filename as part of the key to track it, combined with UUID for uniqueness
+    # This is for the input bucket, as App Tier will download using this key
     unique_input_s3_key = f"{uuid.uuid4()}-{original_filename}"
 
-    # The S3 output key should be the original filename without extension (e.g., test_0)
-    # as per the problem description: "图像名称就是键值（如 test_0）"
-    output_s3_key_base = os.path.splitext(original_filename)[0]
 
     try:
         # Upload image to S3 input bucket
@@ -323,71 +412,41 @@ async def upload_image(myfile: UploadFile = File(...)):
         s3.put_object(Bucket=S3_INPUT_BUCKET, Key=unique_input_s3_key, Body=file_content, ContentType=content_type)
         logging.info(f"Uploaded {original_filename} to S3 as {unique_input_s3_key}")
 
-        # Send message to SQS queue with the unique S3 input key AND the expected S3 output key
-        # App tier will use unique_input_s3_key to download, and output_s3_key_base to upload result
-        queue_url = get_queue_url()
-        if not queue_url:
-            raise HTTPException(status_code=500, detail="SQS queue URL not found.")
+        # Ensure queue URLs are available
+        if not request_queue_url:
+            raise HTTPException(status_code=500, detail="Request SQS queue URL not found.")
 
-        # Message body contains both the input S3 key and the expected output S3 key base
-        # This allows the app tier to know where to save the result.
-        message_body = f"{unique_input_s3_key},{output_s3_key_base}"
+        # Message body contains unique_input_s3_key, original_filename, and unique_request_id
+        # The App Tier will use original_filename and unique_request_id when sending to response SQS.
+        message_body = f"{unique_input_s3_key},{original_filename},{unique_request_id}"
         sqs.send_message(
-            QueueUrl=queue_url,
+            QueueUrl=request_queue_url,
             MessageBody=message_body
         )
-        logging.info(f"Sent message '{message_body}' to SQS queue for {original_filename}.")
+        logging.info(f"Sent message '{message_body}' to request SQS queue for {original_filename}.")
 
-        # --- Polling S3 for result ---
-        # Remove timeout: loop until result is found
-        result_found = False
-        prediction_result = None
+        # Create a Future object for this request and store it
+        loop = asyncio.get_event_loop()
+        future_result = loop.create_future()
+        pending_requests[unique_request_id] = future_result
+        logging.info(f"Added request {unique_request_id} to pending_requests.")
 
-        while True:
-            try:
-                response = s3.get_object(Bucket=S3_OUTPUT_BUCKET, Key=output_s3_key_base)
-                result_content = response['Body'].read().decode('utf-8')
-                logging.info(f"Retrieved result for {original_filename} (S3 key: {output_s3_key_base}): {result_content}")
-                
-                # The output format expected by workload generator is just the prediction
-                # The S3 content should be "(image_name, prediction)"
-                # Example: "(test_0, bathtub)" -> we need to extract "bathtub"
-                if result_content.startswith('(') and result_content.endswith(')'):
-                    # Remove parentheses and split by comma
-                    parts = result_content[1:-1].split(', ', 1) # Split only on the first comma and space
-                    if len(parts) == 2:
-                        # The first part is the image name, second is the prediction
-                        prediction_result = parts[1].strip()
-                        logging.info(f"Parsed prediction for {original_filename}: {prediction_result}")
-                        result_found = True
-                        break
-                    else:
-                        logging.warning(f"Unexpected format for S3 output content: {result_content}")
-                        # If parsing fails, maybe just return raw content or handle as an error
-                        prediction_result = result_content # Fallback
-                        result_found = True
-                        break # Break anyway, don't want to loop forever on bad data
-                else:
-                    prediction_result = result_content # If not in expected format, just return as is
-                    result_found = True
-                    break
-
-            except s3.exceptions.ClientError as e:
-                if e.response['Error']['Code'] == 'NoSuchKey':
-                    # Result not yet available, continue polling
-                    logging.debug(f"Result for '{output_s3_key_base}' not yet available. Polling...")
-                    await asyncio.sleep(WEB_TIER_POLLING_INTERVAL)
-                else:
-                    logging.error(f"Error retrieving result for {output_s3_key_base} from S3: {e}")
-                    raise HTTPException(status_code=500, detail=f"Error retrieving result: {e}")
-            except Exception as e:
-                logging.error(f"An unexpected error occurred during polling for {output_s3_key_base}: {e}")
-                raise HTTPException(status_code=500, detail=f"An unexpected error occurred during result retrieval: {e}")
-
-        # Return only the prediction result as plain text
+        # Await the result from the response queue poller
+        prediction_result = await asyncio.wait_for(future_result, timeout=WEB_TIER_POLLING_INTERVAL * 60) # Increased timeout for practical purposes
+        
+        logging.info(f"Returning prediction for {original_filename}: {prediction_result}")
         return PlainTextResponse(prediction_result)
 
+    except asyncio.TimeoutError:
+        logging.error(f"Timeout waiting for result for {original_filename} (request ID: {unique_request_id}).")
+        # Remove from pending requests if timeout occurs
+        if unique_request_id in pending_requests:
+            del pending_requests[unique_request_id]
+        raise HTTPException(status_code=504, detail="Prediction service timed out.")
     except Exception as e:
         logging.error(f"Error processing upload for {original_filename}: {e}")
+        # Clean up pending request if an error occurs before awaiting result
+        if unique_request_id in pending_requests:
+            del pending_requests[unique_request_id]
         raise HTTPException(status_code=500, detail=f"Failed to process image upload: {e}")
 

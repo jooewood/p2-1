@@ -12,7 +12,7 @@ from key import (
 
 from config import (
     AWS_REGION,
-    S3_INPUT_BUCKET, S3_OUTPUT_BUCKET, SQS_QUEUE_NAME,
+    S3_INPUT_BUCKET, S3_OUTPUT_BUCKET, SQS_QUEUE_NAME, RESPONSE_SQS_QUEUE_NAME, # Added RESPONSE_SQS_QUEUE_NAME
     EC2_KEY_PAIR_NAME, KEY_FILE_PATH
 )
 
@@ -100,24 +100,28 @@ def delete_s3_buckets():
             return False
     return True
 
-def delete_sqs_queue():
-    """Deletes the SQS queue."""
-    print("\n--- Deleting SQS Queue ---")
-    try:
-        response = sqs.get_queue_url(QueueName=SQS_QUEUE_NAME)
-        queue_url = response['QueueUrl']
-        sqs.delete_queue(QueueUrl=queue_url)
-        print(f"SQS queue '{SQS_QUEUE_NAME}' deleted successfully.")
-        return True
-    except sqs.exceptions.ClientError as e:
-        if e.response['Error']['Code'] == 'QueueDoesNotExist':
-            print(f"SQS queue '{SQS_QUEUE_NAME}' does not exist.")
-        else:
-            print(f"Error deleting SQS queue: {e}")
+def delete_sqs_queues():
+    """Deletes all project-related SQS queues."""
+    print("\n--- Deleting SQS Queues ---")
+    queues_to_delete = [SQS_QUEUE_NAME, RESPONSE_SQS_QUEUE_NAME]
+    
+    for queue_name in queues_to_delete:
+        try:
+            response = sqs.get_queue_url(QueueName=queue_name)
+            queue_url = response['QueueUrl']
+            sqs.delete_queue(QueueUrl=queue_url)
+            print(f"SQS queue '{queue_name}' deleted successfully.")
+        except sqs.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == 'QueueDoesNotExist':
+                print(f"SQS queue '{queue_name}' does not exist.")
+            else:
+                print(f"Error deleting SQS queue '{queue_name}': {e}")
+                return False
+        except Exception as e:
+            print(f"An unexpected error occurred while deleting SQS queue '{queue_name}': {e}")
             return False
-    except Exception as e:
-        print(f"An unexpected error occurred while deleting SQS queue: {e}")
-        return False
+    return True
+
 
 def delete_ec2_key_pair():
     """Deletes the EC2 key pair and the local .pem file."""
@@ -177,7 +181,7 @@ if __name__ == "__main__":
     # Order of deletion is important due to dependencies
     # 1. Terminate all instances
     # 2. Delete security groups (after instances are gone)
-    # 3. Delete SQS queue
+    # 3. Delete SQS queue(s)
     # 4. Delete S3 buckets (after queue is empty)
     # 5. Delete key pair
 
@@ -192,7 +196,7 @@ if __name__ == "__main__":
         print("Cleanup failed at security group deletion. Please manually verify.")
         exit(1)
 
-    if not delete_sqs_queue():
+    if not delete_sqs_queues(): # Modified to call the new function
         print("Cleanup failed at SQS queue deletion. Please manually verify.")
         exit(1)
 

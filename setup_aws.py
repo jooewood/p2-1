@@ -11,7 +11,7 @@ from key import (
 
 from config import (
     AWS_REGION,
-    S3_INPUT_BUCKET, S3_OUTPUT_BUCKET, SQS_QUEUE_NAME,
+    S3_INPUT_BUCKET, S3_OUTPUT_BUCKET, SQS_QUEUE_NAME, RESPONSE_SQS_QUEUE_NAME, # Added RESPONSE_SQS_QUEUE_NAME
     EC2_KEY_PAIR_NAME, AMI_ID, WEB_TIER_INSTANCE_TYPE,
     KEY_FILE_PATH, REMOTE_APP_DIR, GIT_REPO_URL
 )
@@ -63,27 +63,33 @@ def create_s3_buckets():
             return False
     return True
 
-def create_sqs_queue():
-    """Creates an SQS queue."""
-    print("\n--- Creating SQS Queue ---")
-    try:
-        response = sqs.create_queue(QueueName=SQS_QUEUE_NAME)
-        queue_url = response['QueueUrl']
-        print(f"SQS queue '{SQS_QUEUE_NAME}' created successfully. URL: {queue_url}")
-        return queue_url
-    except sqs.exceptions.ClientError as e:
-        if "QueueAlreadyExists" in str(e):
-            print(f"SQS queue '{SQS_QUEUE_NAME}' already exists. Retrieving URL...")
-            response = sqs.get_queue_url(QueueName=SQS_QUEUE_NAME)
+def create_sqs_queues():
+    """Creates all necessary SQS queues."""
+    print("\n--- Creating SQS Queues ---")
+    queues_to_create = [SQS_QUEUE_NAME, RESPONSE_SQS_QUEUE_NAME]
+    
+    created_urls = {}
+    for queue_name in queues_to_create:
+        try:
+            response = sqs.create_queue(QueueName=queue_name)
             queue_url = response['QueueUrl']
-            print(f"SQS queue URL: {queue_url}")
-            return queue_url
-        else:
-            print(f"Failed to create SQS queue: {e}")
+            print(f"SQS queue '{queue_name}' created successfully. URL: {queue_url}")
+            created_urls[queue_name] = queue_url
+        except sqs.exceptions.ClientError as e:
+            if "QueueAlreadyExists" in str(e):
+                print(f"SQS queue '{queue_name}' already exists. Retrieving URL...")
+                response = sqs.get_queue_url(QueueName=queue_name)
+                queue_url = response['QueueUrl']
+                print(f"SQS queue URL: {queue_url}")
+                created_urls[queue_name] = queue_url
+            else:
+                print(f"Failed to create SQS queue '{queue_name}': {e}")
+                return None
+        except Exception as e:
+            print(f"An unexpected error occurred with SQS queue '{queue_name}': {e}")
             return None
-    except Exception as e:
-        print(f"An unexpected error occurred with SQS queue: {e}")
-        return None
+    return created_urls
+
 
 def create_ec2_key_pair():
     """Creates an EC2 key pair and saves the .pem file."""
@@ -210,6 +216,7 @@ def launch_web_tier_instance(web_sg_id):
     try:
         with open("key.py", "r") as f_key:
             key_content = f_key.read()
+
         user_data_script = f"""#!/bin/bash
 sudo -i
 cd /home/ubuntu
@@ -238,13 +245,8 @@ echo "Web tier app started."
 echo "==== USER DATA SCRIPT FINISHED ===="
 sleep 2
 """
-# nohup venv/bin/uvicorn web_tier_app:app --host 0.0.0.0 --port 8000 &> web_tier_app.log &
-# source venv/bin/activate
-# uvicorn web_tier_app:app --host 0.0.0.0 --port 8000
-# tail /var/log/cloud-init-output.log
-
     except FileNotFoundError as e:
-        print(f"Error reading file for user_data_web.sh: {e}. Make sure config.py and web_tier_app.py exist locally.")
+        print(f"Error reading file for user_data_web.sh: {e}. Make sure key.py exist locally.")
         return None
     except Exception as e:
         print(f"Error preparing user data script for web tier: {e}")
@@ -316,8 +318,10 @@ if __name__ == "__main__":
         print("Failed to set up S3 buckets. Exiting.")
         exit(1)
 
-    if not create_sqs_queue():
-        print("Failed to set up SQS queue. Exiting.")
+    # Use the new function to create all SQS queues
+    sqs_urls = create_sqs_queues()
+    if not sqs_urls:
+        print("Failed to set up SQS queues. Exiting.")
         exit(1)
 
     if not create_ec2_key_pair():
