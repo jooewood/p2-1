@@ -52,3 +52,7 @@ WEB_TIER_PUBLIC_IP = "" # No longer directly used by user, but still useful for 
 WEB_TIER_POLLING_INTERVAL = 1 # seconds
 
 GIT_REPO_URL = 'https://github.com/jooewood/p2-1.git'
+
+
+WEB_SG_ID = 'sg-0303e7ac2a2d00420'
+APP_SG_ID = 'sg-0960071d7e59020f4'

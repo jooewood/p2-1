@@ -13,7 +13,8 @@ from config import (
     AWS_REGION,
     S3_INPUT_BUCKET, S3_OUTPUT_BUCKET, SQS_QUEUE_NAME, RESPONSE_SQS_QUEUE_NAME, # Added RESPONSE_SQS_QUEUE_NAME
     EC2_KEY_PAIR_NAME, AMI_ID, WEB_TIER_INSTANCE_TYPE,
-    KEY_FILE_PATH, REMOTE_APP_DIR, GIT_REPO_URL
+    KEY_FILE_PATH, REMOTE_APP_DIR, GIT_REPO_URL,
+    WEB_SG_ID
 )
 
 # Initialize AWS clients
@@ -316,26 +317,26 @@ if __name__ == "__main__":
         exit(1)
 
 
-    if not create_s3_buckets():
-        print("Failed to set up S3 buckets. Exiting.")
-        exit(1)
+    # if not create_s3_buckets():
+    #     print("Failed to set up S3 buckets. Exiting.")
+    #     exit(1)
 
-    # Use the new function to create all SQS queues
-    sqs_urls = create_sqs_queues()
-    if not sqs_urls:
-        print("Failed to set up SQS queues. Exiting.")
-        exit(1)
+    # # Use the new function to create all SQS queues
+    # sqs_urls = create_sqs_queues()
+    # if not sqs_urls:
+    #     print("Failed to set up SQS queues. Exiting.")
+    #     exit(1)
 
-    if not create_ec2_key_pair():
-        print("Failed to set up EC2 key pair. Exiting.")
-        exit(1)
+    # if not create_ec2_key_pair():
+    #     print("Failed to set up EC2 key pair. Exiting.")
+    #     exit(1)
 
-    web_sg_id, app_sg_id = create_security_groups()
-    if not web_sg_id or not app_sg_id:
-        print("Failed to create security groups. Exiting.")
-        exit(1)
+    # web_sg_id, app_sg_id = create_security_groups()
+    # if not web_sg_id or not app_sg_id:
+    #     print("Failed to create security groups. Exiting.")
+    #     exit(1)
 
-    web_instance_id = launch_web_tier_instance(web_sg_id)
+    web_instance_id = launch_web_tier_instance(WEB_SG_ID)
     if not web_instance_id:
         print("Failed to launch Web Tier instance. Exiting.")
         exit(1)

@@ -21,7 +21,7 @@ from config import (
     EC2_KEY_PAIR_NAME, AMI_ID, APP_TIER_INSTANCE_TYPE,
     MAX_APP_INSTANCES, MIN_APP_INSTANCES,
     SCALING_CHECK_INTERVAL, WEB_TIER_POLLING_INTERVAL,
-    REMOTE_APP_DIR, GIT_REPO_URL
+    REMOTE_APP_DIR, GIT_REPO_URL, APP_SG_ID
 )
 
 app = FastAPI()
@@ -144,10 +144,6 @@ def get_running_app_instances():
 
 def launch_app_instance(instance_name_tag):
     """Launches a new App Tier EC2 instance."""
-    app_sg_id = get_app_tier_security_group_id()
-    if not app_sg_id:
-        logging.error("Cannot launch App Tier instance: Security Group ID not found.")
-        return None
 
     # This user data script will install necessary packages, clone the classifier repo,
     # and start the app_tier_worker.
@@ -197,7 +193,7 @@ echo "App tier worker started."
             MaxCount=1,
             InstanceType=APP_TIER_INSTANCE_TYPE,
             KeyName=EC2_KEY_PAIR_NAME,
-            SecurityGroupIds=[app_sg_id],
+            SecurityGroupIds=[APP_SG_ID],
             UserData=user_data_app_script,
             TagSpecifications=[
                 {
