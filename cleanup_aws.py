@@ -246,7 +246,7 @@ if __name__ == "__main__":
             print("Usage: python cleanup_aws.py --mode [delete|clear]")
             sys.exit(1)
 
-    # 1. Terminate all instances (always)
+    # Terminate all instances (always)
     if not terminate_all_instances():
         print("Cleanup failed at instance termination. Please manually verify and terminate instances before retrying.")
         exit(1)
@@ -254,33 +254,31 @@ if __name__ == "__main__":
     time.sleep(10)
 
     if mode == "delete":
-        # 2. Delete security groups
+        # Delete security groups
         if not delete_security_groups():
             print("Cleanup failed at security group deletion. Please manually verify.")
             exit(1)
-        # 3. Delete SQS queues
+        # Delete SQS queues
         if not delete_sqs_queues():
             print("Cleanup failed at SQS queue deletion. Please manually verify.")
             exit(1)
-        # 4. Delete S3 buckets
+        # Delete S3 buckets
         if not delete_s3_buckets():
             print("Cleanup failed at S3 bucket deletion. Please manually verify contents and then bucket.")
             exit(1)
-        # 5. Delete key pair
+        # Delete key pair
         if not delete_ec2_key_pair():
             print("Cleanup failed at EC2 key pair deletion. Please manually verify.")
             exit(1)
     elif mode == "clear":
-        # 不删除 security group
-        # 清空 SQS
+        # clear SQS
         if not clear_sqs_queues():
             print("Cleanup failed at SQS queue emptying. Please manually verify.")
             exit(1)
-        # 清空 S3
+        # clear S3
         if not clear_s3_buckets():
             print("Cleanup failed at S3 bucket emptying. Please manually verify contents.")
             exit(1)
-        # 不删除 key pair
     else:
         print(f"Unknown mode: {mode}. Use 'delete' or 'clear'.")
         exit(1)

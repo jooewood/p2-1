@@ -3,20 +3,17 @@
 import os
 
 
-AWS_REGION = 'ap-northeast-2'
+AWS_REGION = 'ap-northeast-3'
 # S3 Bucket Names
-S3_INPUT_BUCKET = 'cse546-zhoudixin-image-input-bucket'
-S3_OUTPUT_BUCKET = 'cse546-zhoudixin-image-output-bucket'
+S3_INPUT_BUCKET = 'cse546-zhoudixin-image-input-bucket' + '-' + AWS_REGION
+S3_OUTPUT_BUCKET = 'cse546-zhoudixin-image-output-bucket' + '-' + AWS_REGION
 
 # SQS Queue Name
-SQS_QUEUE_NAME = 'cse546-zhoudixin-image-processing-queue'
-RESPONSE_SQS_QUEUE_NAME = 'cse546-zhoudixin-image-response-queue' # New: SQS queue for responses
+SQS_QUEUE_NAME = 'cse546-zhoudixin-image-request-queue' + '-' + AWS_REGION
+RESPONSE_SQS_QUEUE_NAME = 'cse546-zhoudixin-image-response-queue' + '-' + AWS_REGION
 
 # EC2 Key Pair Name
-if AWS_REGION == 'ap-northeast-3':
-    EC2_KEY_PAIR_NAME = 'zhoudixin-ap-northeast-3'
-elif AWS_REGION == 'ap-northeast-2':
-    EC2_KEY_PAIR_NAME = 'zhoudixin-ap-northeast-2'
+EC2_KEY_PAIR_NAME = 'zhoudixin' + '-' + AWS_REGION
 
 if AWS_REGION == 'ap-northeast-2':
     AMI_ID = "ami-0662f4965dfc70aca"
@@ -53,6 +50,9 @@ WEB_TIER_POLLING_INTERVAL = 1 # seconds
 
 GIT_REPO_URL = 'https://github.com/jooewood/p2-1.git'
 
-
-WEB_SG_ID = 'sg-0303e7ac2a2d00420'
-APP_SG_ID = 'sg-0960071d7e59020f4'
+if AWS_REGION == 'ap-northeast-2':
+    WEB_SG_ID = 'sg-0303e7ac2a2d00420'
+    APP_SG_ID = 'sg-0960071d7e59020f4'
+elif AWS_REGION == 'ap-northeast-3':
+    WEB_SG_ID = 'sg-037389aae84d1d5a2'
+    APP_SG_ID = 'sg-009732a972aebd8e2'

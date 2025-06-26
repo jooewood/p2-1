@@ -327,9 +327,9 @@ if __name__ == "__main__":
     #     print("Failed to set up SQS queues. Exiting.")
     #     exit(1)
 
-    # if not create_ec2_key_pair():
-    #     print("Failed to set up EC2 key pair. Exiting.")
-    #     exit(1)
+    if not create_ec2_key_pair():
+        print("Failed to set up EC2 key pair. Exiting.")
+        exit(1)
 
     # web_sg_id, app_sg_id = create_security_groups()
     # if not web_sg_id or not app_sg_id:
