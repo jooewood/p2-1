@@ -226,7 +226,7 @@ async def auto_scaling_controller():
     """
     Monitors SQS queue depth and adjusts App Tier EC2 instances.
     Scaling policy:
-    - If queue depth > 10, scale out to 19 app instances (max).
+    - If queue depth > 10, scale out to 10 app instances (max).
     - If queue depth <= 10, gradually scale in to 0.
     - Never exceed 19 running app instances.
     """
