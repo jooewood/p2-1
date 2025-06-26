@@ -51,7 +51,7 @@ Upon successful `setup_aws.py` execution, the following are created:
       (URL: `https://sqs.ap-northeast-3.amazonaws.com/129271359039/cse546-zhoudixin-image-request-queue-ap-northeast-3`)
       * Response Queue: `cse546-zhoudixin-image-response-queue-ap-northeast-3` 
       (URL: `https://sqs.ap-northeast-3.amazonaws.com/129271359039/cse546-zhoudixin-image-response-queue-ap-northeast-3`)
-  * **EC2 Key Pair:** `zhoudixin-ap-northeast-2` (saved as `zhoudixin-ap-northeast-2.pem`).
+  * **EC2 Key Pair:** `zhoudixin-ap-northeast-3` (saved as `zhoudixin-ap-northeast-3.pem`).
 
 **Web Tier URL:** `http://13.208.206.157:8000/upload`
 
